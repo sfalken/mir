@@ -1,14 +1,11 @@
 # Force out of source build
 %undefine __cmake_in_source_build
 
+# Use ccache
+%bcond ccache 0
+
 # Use clang
 %bcond clang 0
-
-# Use lld
-%bcond lld 0
-
-# Use mold
-%bcond mold 0
 
 %if %{with clang}
 # Force clang toolchain
@@ -17,11 +14,28 @@
 %global _lto_cflags %{nil}
 %endif
 
+# openSUSE always disables LTO
+%if 0%{?suse_version}
+%global _lto_cflags %{nil}
+%endif
+
+# Use lld
+%bcond lld 0
+
+# Use mold
+%bcond mold 0
+
 # Debug build with extra compile time checks
 %bcond debug 0
 
-# Run tests by default
+# Run tests - disabled on openSUSE (OBS environment), and on Fedora s390x
+%if 0%{?suse_version}
+%bcond check 0
+%else
+%ifnarch s390x
 %bcond check 1
+%endif
+%endif
 
 # Track various library soversions
 %global miral_sover 7
@@ -43,7 +57,13 @@ Summary:        Next generation Wayland display server toolkit
 License:        (GPL-2.0-only or GPL-3.0-only) and (LGPL-2.1-only or LGPL-3.0-only)
 URL:            https://canonical.com/mir
 Source0:        https://github.com/canonical/%{name}/releases/download/v%{version}/%{name}-%{version}.tar.xz
+%if 0%{?suse_version}
+Source1:        vendor.tar.zst
+%endif
 
+%if %{with ccache}
+BuildRequires:  ccache
+%endif
 %if %{with clang}
 BuildRequires:  clang
 %else
@@ -55,15 +75,56 @@ BuildRequires:  lld
 %if %{with mold}
 BuildRequires:  mold
 %endif
-BuildRequires:  cmake, ninja-build, diffutils, doxygen, graphviz, lcov, gcovr
-BuildRequires:  /usr/bin/xsltproc
-BuildRequires:  boost-devel
-BuildRequires:  python3
-BuildRequires:  glm-devel
-BuildRequires:  glog-devel, lttng-ust-devel, systemtap-sdt-devel
-BuildRequires:  gflags-devel
-BuildRequires:  python3-pillow
+
+# Rust/Cargo handling: Fedora uses cargo-rpm-macros with dynamic crate fetching;
+# openSUSE uses a pre-vendored tarball with cargo-packaging
+%if 0%{?suse_version}
+BuildRequires:  cargo
+BuildRequires:  cargo-packaging
+%else
 BuildRequires:  cargo-rpm-macros >= 24
+%endif
+
+BuildRequires:  cmake
+BuildRequires:  doxygen
+BuildRequires:  graphviz
+BuildRequires:  lcov
+BuildRequires:  gcovr
+BuildRequires:  git-core
+
+%if 0%{?suse_version}
+BuildRequires:  libxslt-tools
+%else
+BuildRequires:  ninja-build
+BuildRequires:  diffutils
+BuildRequires:  /usr/bin/xsltproc
+%endif
+
+BuildRequires:  boost-devel
+%if 0%{?suse_version}
+BuildRequires:  libboost_filesystem-devel
+BuildRequires:  libboost_iostreams-devel
+BuildRequires:  libboost_program_options-devel
+%endif
+
+BuildRequires:  python3
+BuildRequires:  systemtap-sdt-devel
+
+%if 0%{?suse_version}
+BuildRequires:  python3-Pillow
+BuildRequires:  hicolor-icon-theme
+BuildRequires:  cmake(glm)
+BuildRequires:  cmake(glog)
+BuildRequires:  cmake(yaml-cpp)
+BuildRequires:  cmake(GTest) >= 1.8.0
+%else
+BuildRequires:  python3-pillow
+BuildRequires:  python3-dbusmock
+BuildRequires:  glm-devel
+BuildRequires:  glog-devel
+BuildRequires:  gflags-devel
+BuildRequires:  lttng-ust-devel
+%endif
 
 # Everything detected via pkgconfig
 BuildRequires:  pkgconfig(egl)
@@ -72,9 +133,6 @@ BuildRequires:  pkgconfig(freetype2)
 BuildRequires:  pkgconfig(gbm) >= 9.0.0
 BuildRequires:  pkgconfig(glesv2)
 BuildRequires:  pkgconfig(glib-2.0)
-BuildRequires:  pkgconfig(gmock) >= 1.8.0
-BuildRequires:  pkgconfig(gio-2.0)
-BuildRequires:  pkgconfig(gio-unix-2.0)
 BuildRequires:  pkgconfig(gtest) >= 1.8.0
 BuildRequires:  pkgconfig(libdisplay-info)
 BuildRequires:  pkgconfig(libdrm)
@@ -88,35 +146,60 @@ BuildRequires:  pkgconfig(uuid)
 BuildRequires:  pkgconfig(wayland-server)
 BuildRequires:  pkgconfig(wayland-client)
 BuildRequires:  pkgconfig(xcb)
-BuildRequires:  pkgconfig(xcb-composite)
-BuildRequires:  pkgconfig(xcb-xfixes)
-BuildRequires:  pkgconfig(xcb-render)
 BuildRequires:  pkgconfig(xcursor)
 BuildRequires:  pkgconfig(xkbcommon)
 BuildRequires:  pkgconfig(xkbcommon-x11)
-BuildRequires:  pkgconfig(yaml-cpp)
 BuildRequires:  pkgconfig(wlcs)
 
+%if 0%{?suse_version}
+BuildRequires:  pkgconfig(gflags)
+BuildRequires:  pkgconfig(lttng-ust)
+BuildRequires:  pkgconfig(pixman-1)
+BuildRequires:  pkgconfig(wayland-eglstream)
+BuildRequires:  pkgconfig(xwayland)
+%else
+BuildRequires:  pkgconfig(gmock) >= 1.8.0
+BuildRequires:  pkgconfig(gio-2.0)
+BuildRequires:  pkgconfig(gio-unix-2.0)
+BuildRequires:  pkgconfig(xcb-composite)
+BuildRequires:  pkgconfig(xcb-xfixes)
+BuildRequires:  pkgconfig(xcb-render)
+BuildRequires:  pkgconfig(yaml-cpp)
 # pkgconfig(egl) is now from glvnd, so we need to manually pull this in for the Mesa specific bits...
 BuildRequires:  mesa-libEGL-devel
+%endif
 
+%if 0%{?suse_version}
+BuildRequires:  libatomic1
+%else
 # For some reason, this doesn't get pulled in automatically into the buildroot
 BuildRequires:  libatomic
+%endif
 
 # For detecting the font for CMake
+%if 0%{?suse_version}
+BuildRequires:  gnu-free-fonts
+%else
 BuildRequires:  gnu-free-sans-fonts
+%endif
 
 # For validating the desktop file for mir-demos
+%if 0%{?suse_version}
+BuildRequires:  desktop-file-utils
+%else
 BuildRequires:  %{_bindir}/desktop-file-validate
-
 # For the tests
 BuildRequires:  dbus-daemon
-BuildRequires:  python3-dbusmock
 BuildRequires:  xorg-x11-server-Xwayland
+%endif
 
 # Add architectures as verified to work
-%ifarch %{ix86} x86_64 %{arm} aarch64
+%if 0%{?suse_version}
 BuildRequires:  valgrind
+%else
+%ifarch %{ix86} %{x86_64} %{arm32} %{arm64} riscv64
+BuildRequires:  valgrind
+%endif
 %endif
 
 
@@ -127,16 +210,36 @@ and a well-defined driver model.
 
 %package devel
 Summary:       Development files for Mir
+%if 0%{?suse_version}
+Requires:      %{name}-test-libs-static = %{version}
+Requires:      libmircommon%{mircommon_sover} = %{version}
+Requires:      libmirevdev%{mirplatforminput_sover} = %{version}
+Requires:      libmiroil%{miroil_sover} = %{version}
+Requires:      libmirserver%{mirserver_sover} = %{version}
+Requires:      libmirserverplatform%{mirplatformgraphics_sover} = %{version}
+%else
 Requires:      %{name}-common-libs%{?_isa} = %{?epoch:%{epoch}:}%{version}-%{release}
 Requires:      %{name}-server-libs%{?_isa} = %{?epoch:%{epoch}:}%{version}-%{release}
 Requires:      %{name}-lomiri-libs%{?_isa} = %{?epoch:%{epoch}:}%{version}-%{release}
 Requires:      %{name}-test-libs-static%{?_isa} = %{?epoch:%{epoch}:}%{version}-%{release}
+%endif
 # Documentation can no longer be built properly
 Obsoletes:     %{name}-doc < 2.15.0
 
 %description devel
 This package provides the development files to create compositors
 built on Mir.
+
+%if 0%{?suse_version}
+%package private-devel
+Summary:       Development files for Mir exposing private internals
+Requires:      %{name}-devel = %{version}
+
+%description private-devel
+This package provides extra development files to create compositors
+built on Mir that need access to private internal interfaces.
+
+%else
 
 %package internal-devel
 Summary:       Development files for Mir exposing private internals
@@ -145,6 +248,80 @@ Requires:      %{name}-devel%{?_isa} = %{?epoch:%{epoch}:}%{version}-%{release}
 %description internal-devel
 This package provides extra development files to create compositors
 built on Mir that need access to private internal interfaces.
+
+%endif
+
+# Library subpackages differ significantly between Fedora and openSUSE:
+# Fedora groups libraries into common-libs/server-libs/lomiri-libs;
+# openSUSE requires individually named and versioned library packages.
+%if 0%{?suse_version}
+
+%package -n libmircommon%{mircommon_sover}
+Summary:       Common Mir library
+License:       LGPL-2.1-only OR LGPL-3.0-only
+
+%description -n libmircommon%{mircommon_sover}
+Component library of the Mir compositing stack
+
+%package -n libmircore%{mircore_sover}
+Summary:       Mir core library
+License:       LGPL-2.1-only OR LGPL-3.0-only
+
+%description -n libmircore%{mircore_sover}
+Component library of the Mir compositing stack
+
+%package -n libmirplatform%{mirplatform_sover}
+Summary:       Mir platform library
+License:       LGPL-2.1-only OR LGPL-3.0-only
+
+%description -n libmirplatform%{mirplatform_sover}
+Component library of the Mir compositing stack
+
+%package -n libmiroil%{miroil_sover}
+Summary:       Lomiri compatibility libraries for Mir
+License:       LGPL-2.1-only OR LGPL-3.0-only
+
+%description -n libmiroil%{miroil_sover}
+This package provides the libraries for Lomiri to use Mir as a Wayland compositor
+
+%package -n libmiral%{miral_sover}
+Summary:       Mir Abstraction Layer library
+License:       LGPL-2.1-only OR LGPL-3.0-only
+
+%description -n libmiral%{miral_sover}
+Component library of the Mir compositing stack
+
+%package -n libmirserver%{mirserver_sover}
+Summary:       Mir server library
+License:       GPL-2.0-only OR GPL-3.0-only
+Requires:      libmirevdev%{mirplatforminput_sover}
+Requires:      libmirserverplatform%{mirplatformgraphics_sover}
+
+%description -n libmirserver%{mirserver_sover}
+Component library of the Mir compositing stack
+
+%package -n libmirwayland%{mirwayland_sover}
+Summary:       Mir Wayland library
+License:       LGPL-2.1-only OR LGPL-3.0-only
+
+%description -n libmirwayland%{mirwayland_sover}
+Component library of the Mir compositing stack
+
+%package -n libmirserverplatform%{mirplatformgraphics_sover}
+Summary:       Mir Server Platform Library
+License:       LGPL-2.1-only OR LGPL-3.0-only
+
+%description -n libmirserverplatform%{mirplatformgraphics_sover}
+Component library of the Mir server platform
+
+%package -n libmirevdev%{mirplatforminput_sover}
+Summary:       Evdev support for Mir
+License:       LGPL-2.1-only OR LGPL-3.0-only
+
+%description -n libmirevdev%{mirplatforminput_sover}
+evdev support library for the Mir server platform
+
+%else
 
 %package common-libs
 Summary:       Common libraries for Mir
@@ -181,13 +358,20 @@ Requires:      %{name}-common-libs%{?_isa} = %{?epoch:%{epoch}:}%{version}-%{rel
 This package provides the libraries for applications
 that use the Mir server.
 
+%endif
+
 %package test-tools
 Summary:       Testing tools for Mir
 License:       GPL-2.0-only or GPL-3.0-only
+%if 0%{?suse_version}
+Requires:      libmirserver%{mirserver_sover} = %{version}
+Recommends:    xwayland
+%else
 Requires:      %{name}-server-libs%{?_isa} = %{?epoch:%{epoch}:}%{version}-%{release}
+Recommends:    xorg-x11-server-Xwayland
+%endif
 Recommends:    %{name}-demos
 Recommends:    glmark2
-Recommends:    xorg-x11-server-Xwayland
 Requires:      wlcs
 # mir-perf-framework is no more...
 Obsoletes:     python3-mir-perf-framework < 2.6.0
@@ -200,13 +384,22 @@ This package provides tools for testing Mir.
 %package demos
 Summary:       Demonstration applications using Mir
 License:       GPL-2.0-only or GPL-3.0-only
+%if 0%{?suse_version}
+Requires:      libmirserver%{mirserver_sover} = %{version}
+Requires:      xwayland
+%else
 Requires:      %{name}-server-libs%{?_isa} = %{?epoch:%{epoch}:}%{version}-%{release}
+Requires:      xorg-x11-server-Xwayland
+%endif
 Requires:      inotify-tools
 Requires:      hicolor-icon-theme
-Requires:      xorg-x11-server-Xwayland
 Requires:      xkeyboard-config
+%if 0%{?suse_version}
+Requires:      gnu-free-fonts
+%else
 # For some of the demos
 Requires:      gnu-free-sans-fonts
+%endif
 
 %description demos
 This package provides applications for demonstrating
@@ -215,7 +408,11 @@ the capabilities of the Mir display server.
 %package test-libs-static
 Summary:       Testing framework library for Mir
 License:       GPL-2.0-only or GPL-3.0-only
+%if 0%{?suse_version}
+Requires:      %{name}-devel = %{version}
+%else
 Requires:      %{name}-devel%{?_isa} = %{?epoch:%{epoch}:}%{version}-%{release}
+%endif
 
 %description test-libs-static
 This package provides the static library for building
@@ -223,29 +420,44 @@ Mir unit and integration tests.
 
 
 %prep
-%autosetup
+%if 0%{?suse_version}
+%autosetup -S git_am -a1
+sed -e "s/-Werror//g" -i CMakeLists.txt
+%else
+%autosetup -S git_am
 %cargo_prep
+%endif
 
 
+%if ! 0%{?suse_version}
 %generate_buildrequires
 %cargo_generate_buildrequires
+%endif
 
 
 %conf
-%cmake	-GNinja \
+%cmake \
+	%{!?suse_version:-GNinja} \
+	%{?with_ccache:-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache} \
 	%{?with_debug:-DCMAKE_BUILD_TYPE=Debug} \
 	%{!?with_debug:-DMIR_FATAL_COMPILE_WARNINGS=OFF} \
 	%{?with_lld:-DMIR_USE_LD=lld} \
 	%{?with_mold:-DMIR_USE_LD=mold} \
 	-DMIR_USE_PRECOMPILED_HEADERS=OFF \
 	-DCMAKE_INSTALL_LIBEXECDIR="usr/libexec/mir" \
+%if 0%{?suse_version}
+	-DMIR_PLATFORM="gbm-kms;x11;wayland;eglstream-kms"
+%else
 	-DMIR_PLATFORM="atomic-kms;gbm-kms;wayland;x11"
+%endif
 
 
 %build
 %cmake_build
+%if ! 0%{?suse_version}
 %cargo_license_summary
 %{cargo_license} > LICENSE.dependencies
+%endif
 
 
 %install
@@ -255,10 +467,27 @@ Mir unit and integration tests.
 %check
 %if %{with check}
 export XDG_RUNTIME_DIR=$(mktemp -d)
+%if 0%{?suse_version}
+( %ctest ) || :
+%else
 %ctest
+%endif
 rm -rf $XDG_RUNTIME_DIR
 %endif
 desktop-file-validate %{buildroot}%{_datadir}/applications/miral-shell.desktop
+
+
+%if 0%{?suse_version}
+%ldconfig_scriptlets -n libmircommon%{mircommon_sover}
+%ldconfig_scriptlets -n libmircore%{mircore_sover}
+%ldconfig_scriptlets -n libmirplatform%{mirplatform_sover}
+%ldconfig_scriptlets -n libmiroil%{miroil_sover}
+%ldconfig_scriptlets -n libmiral%{miral_sover}
+%ldconfig_scriptlets -n libmirserver%{mirserver_sover}
+%ldconfig_scriptlets -n libmirwayland%{mirwayland_sover}
+%ldconfig_scriptlets -n libmirserverplatform%{mirplatformgraphics_sover}
+%ldconfig_scriptlets -n libmirevdev%{mirplatforminput_sover}
+%endif
 
 
 %files devel
@@ -270,10 +499,61 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/miral-shell.desktop
 %{_includedir}/mir*/
 %exclude %{_includedir}/mir*internal/
 
+%if 0%{?suse_version}
+%files private-devel
+%else
 %files internal-devel
+%endif
 %license COPYING.*
 %{_libdir}/pkgconfig/mir*internal.pc
 %{_includedir}/mir*internal/
+
+%if 0%{?suse_version}
+
+%files -n libmircommon%{mircommon_sover}
+%license COPYING.LGPL*
+%doc README.md
+%dir %{_libdir}/%{name}
+%{_libdir}/libmircommon.so.%{mircommon_sover}
+
+%files -n libmircore%{mircore_sover}
+%{_libdir}/libmircore.so.%{mircore_sover}
+
+%files -n libmirplatform%{mirplatform_sover}
+%{_libdir}/libmirplatform.so.%{mirplatform_sover}
+
+%files -n libmiroil%{miroil_sover}
+%{_libdir}/libmiroil.so.%{miroil_sover}
+
+%files -n libmiral%{miral_sover}
+%{_libdir}/libmiral.so.%{miral_sover}
+
+%files -n libmirserver%{mirserver_sover}
+%license COPYING.GPL*
+%doc README.md
+%{_libdir}/libmirserver.so.%{mirserver_sover}
+
+%files -n libmirwayland%{mirwayland_sover}
+%{_libdir}/libmirwayland.so.%{mirwayland_sover}
+
+%files -n libmirserverplatform%{mirplatformgraphics_sover}
+%license COPYING.GPL*
+%doc README.md
+%dir %{_libdir}/%{name}/server-platform
+%{_libdir}/%{name}/server-platform/graphics-eglstream-kms.so.%{mirplatformgraphics_sover}
+%{_libdir}/%{name}/server-platform/graphics-gbm-kms.so.%{mirplatformgraphics_sover}
+%{_libdir}/%{name}/server-platform/graphics-wayland.so.%{mirplatformgraphics_sover}
+%{_libdir}/%{name}/server-platform/renderer-egl-generic.so.%{mirplatformgraphics_sover}
+%{_libdir}/%{name}/server-platform/server-virtual.so.%{mirplatformgraphics_sover}
+%{_libdir}/%{name}/server-platform/server-x11.so.%{mirplatformgraphics_sover}
+
+%files -n libmirevdev%{mirplatforminput_sover}
+%license COPYING.GPL*
+%doc README.md
+%{_libdir}/%{name}/server-platform/input-evdev.so.%{mirplatforminput_sover}
+%{_libdir}/%{name}/server-platform/input-evdev-rs.so.%{mirplatforminput_sover}
+
+%else
 
 %files common-libs
 %license COPYING.LGPL*
@@ -304,6 +584,8 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/miral-shell.desktop
 %{_libdir}/%{name}/server-platform/server-virtual.so.%{mirplatformgraphics_sover}
 %{_libdir}/%{name}/server-platform/server-x11.so.%{mirplatformgraphics_sover}
 
+%endif
+
 %files test-tools
 %license COPYING.GPL*
 %{_bindir}/mir-*test*
@@ -325,6 +607,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/miral-shell.desktop
 %files demos
 %license COPYING.GPL*
 %doc README.md
+%dir %{_datadir}/%{name}
 %{_bindir}/mir_demo_*
 %{_bindir}/mir-x11-kiosk*
 %{_bindir}/miral-*

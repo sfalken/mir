@@ -48,6 +48,7 @@ jobs:
           "lxd:...:fedora_43"
           "lxd:...:fedora_clang"
           "lxd:...:fedora_rawhide"
+          "lxd:...:opensuse_tumbleweed"
           "lxd:...:spread/ubuntu:asan"
           "lxd:...:spread/ubuntu:asan_clang"
           "lxd:...:spread/ubuntu:clang"

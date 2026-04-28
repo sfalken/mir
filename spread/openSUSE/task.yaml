@@ -1,0 +1,101 @@
+summary: Build openSUSE packages
+systems: [opensuse-tumbleweed]
+variants: [opensuse_tumbleweed]
+kill-timeout: 60m
+
+execute: |
+    TEST_PKGS=(
+      cmake
+      createrepo_c
+    )
+
+    # Always enable ccache via the spec bcond (triggers cmake launcher flags)
+    RPMBUILD_EXTRA_OPTIONS+=(--with ccache)
+
+    if [ "${CLANG}" -eq 1 ]; then
+        RPMBUILD_EXTRA_OPTIONS+=(--with clang)
+        TEST_PKGS+=( clang )
+    else
+        TEST_PKGS+=( gcc gcc-c++ )
+    fi
+
+    if [ "${LINKER}" != "ld" ]; then
+        RPMBUILD_EXTRA_OPTIONS+=(--with ${LINKER})
+        TEST_PKGS+=( ${LINKER} )
+    fi
+
+    zypper --non-interactive install ccache rpmdevtools cargo zstd
+
+    rpmdev-setuptree
+    cp ${SPREAD_PATH}/mir-*.tar.xz ~/rpmbuild/SOURCES/
+    cp ${SPREAD_PATH}/rpm/mir.spec ~/rpmbuild/SPECS/
+    # Copy any openSUSE-specific patches
+    find ${SPREAD_PATH}/rpm -name '*.patch' -exec cp {} ~/rpmbuild/SOURCES/ \;
+
+    # Generate vendor.tar.zst for Rust dependencies.
+    # OBS provides this pre-built; in CI we create it from source.
+    tar -xf ${SPREAD_PATH}/mir-*.tar.xz -C /tmp
+    pushd /tmp/mir-*/
+    cargo vendor vendor
+    tar -I zstd -cf ~/rpmbuild/SOURCES/vendor.tar.zst vendor/
+    popd
+    rm -rf /tmp/mir-*/
+
+    # Install build dependencies derived from the spec
+    zypper --non-interactive install \
+        $(rpmspec "${RPMBUILD_EXTRA_OPTIONS[@]}" -q --buildrequires \
+          ~/rpmbuild/SPECS/mir.spec 2>/dev/null | sort -u)
+
+    rpmbuild -ba \
+      "${RPMBUILD_EXTRA_OPTIONS[@]}" \
+      ~/rpmbuild/SPECS/mir.spec
+
+    ccache --show-stats --zero-stats > ${CCACHE_DIR}/ccache.stats
+
+    if [ "${SPREAD_SYSTEM}" = "${SPREAD_VARIANT/_/-}" ]; then
+      zypper --non-interactive install ${TEST_PKGS[@]}
+
+      # Build local repository for end-to-end tests
+      # RPMs land under RPMS/<arch>/, so point createrepo at the parent
+      createrepo_c ~/rpmbuild/RPMS
+      zypper addrepo \
+        --no-gpgcheck \
+        --priority 90 \
+        "file://${HOME}/rpmbuild/RPMS" mirpr
+      zypper --non-interactive refresh mirpr
+
+      # [doc:first-compositor:opensuse-dependencies-install]
+      zypper --non-interactive install 'pkgconfig(miral)'
+      zypper --non-interactive install bomber
+      # [doc:first-compositor:opensuse-dependencies-install-end]
+
+      cd ${SPREAD_PATH}/doc/sphinx/tutorial/first-wayland-compositor
+
+      cmake .
+
+      # [doc:first-compositor:build]
+      cmake .
+      cmake --build .
+      # [doc:first-compositor:build-end]
+
+      # we expect the timeout to hit
+      timeout 10 bash -e <<EOF || [ $? -eq 124 ]
+
+        trap "jobs -p | xargs -r kill" SIGINT SIGTERM EXIT
+
+        export \
+          MIR_SERVER_PLATFORM_DISPLAY_LIBS=mir:virtual \
+          MIR_SERVER_VIRTUAL_OUTPUT=800x600
+
+        # [doc:first-compositor:run]
+        WAYLAND_DISPLAY=wayland-99 ./demo-mir-compositor &
+        # [doc:first-compositor:run-end]
+
+        # wait for the socket
+        timeout --preserve-status 3 bash -c "while [ ! -S $XDG_RUNTIME_DIR/wayland-99 ]; do sleep 0.1; done"
+
+        # [doc:first-compositor:run-client]
+        WAYLAND_DISPLAY=wayland-99 bomber
+        # [doc:first-compositor:run-client-end]
+    EOF
+    fi
